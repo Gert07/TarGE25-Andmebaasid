@@ -2235,3 +2235,641 @@ order by Name
 --subquery on alati sulgudes ja neid nimetatakse 
 --sisemisteks päringuteks
 
+--tund 11
+--19.05.2026
+
+--rohkete andmetega testimise tabel
+
+truncate table Product
+truncate table ProductSales
+
+drop table Product
+drop table ProductSales
+
+create table Product
+(
+Id int identity primary key,
+Name nvarchar(50),
+Description nvarchar(250)
+)
+
+create table ProductSales
+(
+Id int primary key identity,
+ProductId int foreign key references Product(Id),
+UnitPrice int,
+QuantitySold int
+)
+
+
+--- sisestame n'idisandmed Product tabelisse
+declare @Id int
+set @Id = 1
+while(@Id <= 3000000)
+begin
+	insert into Product values('Product ' + cast(@Id as nvarchar(20)), 
+	'Description for product ' + cast(@Id as nvarchar(20)))
+
+	print @Id
+	set @Id = @Id + 1
+end
+
+declare @RandomProductId int
+declare @RandomUnitPrice int
+declare @RandomQuantitySold int
+
+-- ProductId
+declare @LowerLimitForProductId int
+declare @UpperLimitForProductId int
+
+set @LowerLimitForProductId = 1
+set @UpperLimitForProductId = 3000
+
+--unitPrice
+declare @LowerLimitForUnitPrice int
+declare @UpperLimitForUnitPrice int
+
+set @LowerLimitForUnitPrice = 1
+set @UpperLimitForUnitPrice = 3000
+
+--QuantitySold
+declare @LowerLimitForQuantitySold int
+declare @UpperLimitForQuantitySold int
+
+set @LowerLimitForQuantitySold = 1
+set @UpperLimitForQuantitySold = 100
+
+declare @Counter int
+set @Counter = 1
+
+while(@Counter <= 500000)
+begin
+
+	set @RandomProductId = round(((@UpperLimitForProductId - 
+	@LowerLimitForProductId) * rand() + @LowerLimitForProductId), 0)
+
+	set @RandomUnitPrice = round(((@UpperLimitForUnitPrice -
+	@LowerLimitForUnitPrice) * rand() + @LowerLimitForUnitPrice), 0)
+
+	set @RandomQuantitySold = round(((@UpperLimitForQuantitySold - 
+	@LowerLimitForQuantitySold) * rand() + @LowerLimitForQuantitySold), 0)
+
+	insert into ProductSales
+	values(@RandomProductId, @RandomUnitPrice, @RandomQuantitySold)
+
+	print @Counter
+	set @Counter = @Counter + 1
+end
+
+--võrdleme subquerit ja joini jõudlust
+select Id, Name, Description
+from Product
+where Id in
+(
+select Product.Id from ProductSales
+)
+--3 miljonit rida 12 sekundiga
+--teeme cache puhtaks
+checkpoint;
+dbcc DropCleanBuffers;
+dbcc FreeProcCache
+--join päring
+
+select distinct ProductSales.Id, Name, Description
+from Product
+inner join ProductSales
+on Product.Id = ProductSales.ProductId 
+
+select Id, Name, Description
+from Product 
+where not exists
+(
+select * from ProductSales where ProductId = Product.Id
+)
+
+--sain 2997000 rida 12 sekundiga
+
+--join päring 
+select P.Id, P.Name, P.Description
+from Product P
+left join ProductSales PS
+on P.Id = PS.ProductId
+where PS.ProductId is null
+
+--CURSOR
+update ProductSales set UnitPrice = 50
+where ProductSales.ProductId = 101
+-------------------Päring Algab-----------------------------
+declare @ProductId int
+declare ProductIdCursor cursor for
+select ProductId from ProductSales
+open ProductIdCursor
+fetch next from ProductIdCursor into @ProductId
+
+while(@@FETCH_STATUS = 0)
+begin
+	declare @ProductName nvarchar(50)
+	select @ProductName = Name from Product where Id = @ProductId
+
+	if (@ProductName = 'Product 1')
+	begin
+		update ProductSales set UnitPrice = 999 where ProductId = @ProductId
+	end
+	else if (@ProductName = 'Product 888')
+	begin
+		update ProductSales set UnitPrice = 888 where ProductId = @ProductId
+	end
+	else if (@ProductName = 'Product 777')
+	begin
+		update ProductSales set UnitPrice = 777 where ProductId = @ProductId
+	end
+
+	fetch next from ProductIdCursor into @ProductId
+end
+--vabastab rea seadistuse e suleb cursori 
+close ProductIdCursor
+deallocate ProductIdCursor
+------------------------------------------------------
+
+select * from Product
+
+--vaatame kas read on uuenenud
+--kasutage joini ja where 
+
+select P.Name as ProductName, PS.UnitPrice as UpdatedPrice
+from Product P 
+join ProductSales PS
+	on P.Id = PS.ProductId
+where P.name in ('Product 1', 'Product 888', 'Product 777')
+
+--sama tulemusega päring aga kasutame cursorit
+--tuleb kasutdada Case ja lihtsalt joini 
+--------------------------------------------------------------------
+declare @SaleId int;
+declare @NewPrice int;
+
+declare ProductIdCursor cursor for 
+select
+	PS.Id,
+	case P.Name
+		when 'Product 1' then 999
+		when 'Product 888' then 888
+		when 'Product 777' then 777
+	end as CalculatedPrice
+from ProductSales ps
+join Product P 
+	on PS.ProductId = P.ID
+where P.Name in ('Product 1', 'Product 888', 'Product 777');
+
+open ProductIdCursor
+fetch next from ProductIdCursor into @SaleId, @NewPrice
+
+while(@@FETCH_STATUS = 0)
+begin 
+	update ProductSales
+	set UnitPrice = @NewPrice
+	where Id = @SaleId
+
+	fetch next from ProductIdCursor into @SaleId, @NewPrice
+end
+
+close ProductIdCursor
+deallocate ProductIdCursor
+
+--lihtsam ja kiirem 
+----------------------------------------------------------
+update ProductSales
+set UnitPrice = 
+	case
+		when Name = 'Product 1' then 1777
+		when Name = 'Product 888' then 2888
+		when Name = 'Product 777' then 2789
+	end
+from ProductSales
+join Product
+on Product.Id = ProductSales.ProductId
+where Name = 'Product 1' or Name = 'Product 888' or Name = 'Product 777'
+
+--tabelite info 
+--nimekiri tabelitest
+select * from sysobjects where xtype = 'S'
+
+select * from sys.tables
+--nimekiri tabelitest ja view-st
+
+select * from INFORMATION_SCHEMA.TABLES
+
+select distinct XTYPE from sysobjects
+
+if not exists (select * from INFORMATION_SCHEMA.TABLES where TABLE_NAME = 'Employee123')
+begin 
+	create table Employee123
+	(
+	Id int primary key,
+	Name nvarchar(30),
+	ManagerId int
+	)
+
+		print 'Table created'
+	end
+	else
+	begin 
+		print 'Table Employee already exists'
+end
+
+--saab kasutada ka sisseehitatud funktsiooni: OBJECT_ID()
+if OBJECT_ID('Employee') is null
+begin 
+	print 'Table created'
+end
+else begin
+	print 'Table already exists'
+end
+
+--tahame Employee nimega tabeli ära kustutada ja siis uuest luua
+--kasutame OBJECT_ID-d
+
+if OBJECT_ID('Employee123') is not null
+begin 
+	drop table Employee123
+		print 'Table successfully deleted'
+	create table Employee123
+	(
+	Id int primary key,
+	Name nvarchar(30),
+	ManagerId int
+	)
+		print 'New table created'
+end
+else
+begin 
+	print 'Table not found'
+end
+
+--kui teha uuesti käivitatakse  veeru kontrollimist ja loomist
+if not exists(select * from INFORMATION_SCHEMA.COLUMNS where 
+COLUMN_NAME = 'Email' and TABLE_NAME = 'Employee' and TABLE_SCHEMA = 'dbo')
+begin
+	alter table Employee
+	add Email nvarchar(50)
+end
+else
+begin
+	print 'Column already exists'
+end
+
+--kontrollime kas mingi nimega veerg on olemas
+if COL_LENGTH('Employee', 'Email') is null
+begin
+	print 'Email column does not exist'
+end
+else
+begin
+	print 'Email column exists'
+end
+
+----------------------------------------------------------------------------MERGE---------------------------------------------------------------------------------
+-----NÄIDE:
+Merge Product as Target 
+Using DailyProductFeed as source
+	on Target.Id = Source.Id
+
+when matched then
+	update set Target.UnitPrice = Source.UnitPrice
+
+when not matched by target then 
+	insert (Id, Name, UnitPrice)
+	values(Source.Id, Source.Name, Source.UnitPrice)
+
+when not matched by source then
+	delete
+
+----------
+
+create table StudentSource
+(
+Id int primary key,
+Name nvarchar(20)
+)
+insert into StudentSource values(1, 'Mike')
+insert into StudentSource values(2, 'Sara')
+
+create table StudentTarget
+(
+Id int primary key,
+Name nvarchar(20)
+)
+insert into StudentTarget values(1, 'Mike M')
+insert into StudentTarget values(2, 'John')
+
+--------------------
+-------MERGE--------
+Merge StudentTarget as Target 
+Using StudentSource as Source
+	on Target.Id = Source.Id
+
+when matched then
+	update set Target.Name = Source.Name
+
+when not matched by target then 
+	insert (Id, Name)
+	values(Source.Id, Source.Name)
+
+when not matched by source then
+	delete
+;
+
+-----------------------------------------TRANSACTIONID---------------------------------------------------
+use TARge25Db
+
+create table Account 
+(
+Id int primary key,
+AccountName nvarchar (25),
+Balance int,
+)
+
+insert into Account values
+(1, 'Mark', 1000),
+(2, 'Mary', 2000)
+
+--Transactioni näide, mõlemad read peavad õnnestuma, et muudatused
+--jääksid kehtima
+
+begin try
+	begin transaction
+		update Account set Balance = Balance - 100 where Id = 1
+		update Account set Balance = Balance + 100 where Id = 2
+	commit transaction
+	print 'Transaction completed succesfully'
+end try
+begin catch
+	rollback transaction
+	print 'Transaction failed'
+end catch
+go 
+select * from Account
+
+------ dirty read näide ---------
+create table Inventory
+(
+	Id int identity primary key,
+	Product nvarchar(100),
+	ItemsInStock int
+)
+go
+insert into Inventory values ('TV', 10)
+select * from Inventory
+
+
+-------------------------------Dirty read näide------------
+
+--1. käsklus
+begin tran
+update Inventory set ItemsInStock = 9 where Id = 1
+--klientidele tuleb arve
+waitfor delay '00:00:15'
+--ebapiisav saldojääk ja teeb rollbacki
+rollback tran
+
+--- 2.käsklus
+--samal ajal tegin uue päringu
+-- kus kohe peale esimest käsklust käivitan teise käskluse
+set tran isolation level read uncommitted 
+select * from Inventory where Id = 1
+
+--3. käsklus
+select * from Inventory (nolock) where Id = 1
+
+--lost update ehk kadunud uuendused 
+select * from Inventory
+--- 1 transaction
+--- 1 käsklus
+begin tran 
+declare @ItemsInStock int
+
+select @ItemsInStock = ItemsInStock
+from Inventory where Id = 1
+
+waitfor delay '00:00:15'
+set @ItemsInStock = @ItemsInStock - 1
+
+update Inventory
+set ItemsInStock = @ItemsInStock
+where Id = 1
+
+print @ItemsInStock
+commit transaction
+
+--- 2 transaction
+--- 2 käsklus
+
+set tran isolation level repeatable read
+begin tran 
+declare @ItemsInStock int
+
+select @ItemsInStock = ItemsInStock
+from Inventory where Id = 1
+
+waitfor delay '00:00:01'
+set @ItemsInStock = @ItemsInStock - 2
+
+update Inventory
+set ItemsInStock = @ItemsInStock
+where Id = 1
+
+print @ItemsInStock
+commit tran
+
+
+------------------Non-Repeatable read näide---------------------
+
+---- 1 transaction
+set tran isolation level repeatable read
+begin tran 
+select ItemsInStock from Inventory where Id = 1
+waitfor delay '00:00:15'
+select ItemsInStock from Inventory where Id = 1
+commit tran
+
+--- 2 transaction
+update Inventory set ItemsInStock = 5
+where Id = 1
+
+-------------------- Phantom read -------------------
+
+create table Employee
+(
+Id int primary key,
+Name nvarchar(30)
+)
+
+insert into Employee values 
+(1, 'Mark'),
+(2, 'Sara'),
+(100, 'Mary')
+
+--- 1 transaction
+--- 1 käsklus
+
+set tran isolation level serializable
+
+begin tran 
+select * from Employee where Id between 1 and 3 
+
+waitfor delay '00:00:15'
+select * from Employee where Id between 1 and 3 
+commit tran
+
+--- 2 transaction
+--- 2 käsklus
+
+insert into Employee
+values(2, 'Marcus')
+
+
+---------------------- DEADLOCK -------------------------
+
+create table TableA
+(
+Id int identity primary key,
+Name nvarchar(20)
+)
+go
+insert into TableA values ('Mark')
+create table TableB
+(
+id int identity primary key,
+Name nvarchar(20)
+)
+go
+insert into TableB values ('Mary')
+
+-- transaction 1
+
+begin tran
+update TableA set Name = 'Mark transaction 1' where Id = 1
+
+update TableB set Name = 'Mary transaction 1' where Id = 1
+
+commit tran
+
+truncate table TableA
+truncate table TableB
+
+insert into TableA values
+('Mark'),
+('Ben'),
+('Todd'),
+('Pam'),
+('Sara')
+
+insert into TableB values
+('Mary')
+
+-- transaction 1
+
+begin tran 
+update TableA set Name = 
+Name + 'Transaction 1' where Id in (1,2,3,4,5)
+
+update TableB set Name = Name + 'Transaction 1' where Id = 1
+
+commit tran 
+
+
+-- transaction 2 
+set deadlock_priority high
+go
+begin tran
+update TableB set Name = 
+Name + 'Transaction 1' where Id = 1
+----
+update TableA set Name =
+Name + 'Transaction 1' where Id in (1,2,3,4,5)
+----
+commit tran
+
+--deadlocki logimine
+
+dbcc Traceon(1222, -1)
+
+dbcc TraceStatus(1222, -1)
+
+dbcc TraceOff(1222, -1)
+
+truncate table TableA
+truncate table TableB
+
+create proc spTransaction1
+as begin
+	begin tran
+	update TableA set Name = 'Mark Transaction 1' where Id = 1
+	waitfor delay '00:00:05'
+	update TableB set Name = 'Mary Transaction 1' where Id = 1
+	commit tran
+end
+
+create proc spTransaction2
+as begin
+	begin tran
+	update TableA set Name = 'Mark Transaction 2' where Id = 2
+	waitfor delay '00:00:05'
+	update TableB set Name = 'Mary Transaction 2' where Id = 2
+	commit tran
+end
+
+exec spTransaction1
+exec spTransaction2
+--errorlogi kuvamine
+exec sp_readerrorlog	
+
+-- kuidas leida viga koodi abil
+--selleks on meil vaja õiget objectID
+select OBJECT_NAME([OBJECT_ID])
+from sys.partitions
+where hobt_id =	227
+
+alter proc spTransaction1
+as begin 
+	begin tran
+	begin try
+		update TableA set Name = 'Mark transaction 1' where Id = 1
+		waitfor delay '00:00:05'
+		update TableB set Name = 'Mary transaction 1' where Id = 1
+
+		commit tran
+		select 'Transaction successful'
+	end try
+	begin catch
+		if error_number() = 1205
+		begin
+			select 'Deadlock detected'
+		end
+
+		rollback
+	end catch
+end
+
+alter proc spTransaction2
+as begin 
+	begin tran
+	begin try
+		update TableA set Name = 'Mark transaction 2' where Id = 1
+		waitfor delay '00:00:05'
+		update TableB set Name = 'Mary transaction 2' where Id = 1
+
+		commit tran
+		select 'Transaction successful'
+	end try
+	begin catch
+		if error_number() = 1205
+		begin
+			select 'Deadlock detected'
+		end
+
+		rollback
+	end catch
+end
+
+exec spTransaction1
